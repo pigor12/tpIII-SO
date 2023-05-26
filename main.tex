@@ -1,0 +1,612 @@
+\documentclass[10pt]{article}
+\usepackage[brazil]{babel}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{listingsutf8}
+\usepackage{fontspec}
+\usepackage{biblatex}
+\usepackage[blocks]{authblk}
+\usepackage[pdfborder={0 0 0}]{hyperref}
+\addbibresource{main.bib}
+\setmonofont{Fira Code}[Contextuals=Alternate]
+\usepackage[verbatim]{lstfiracode}
+\title{Sistemas Operacionais - TPIII}
+\date{11 de Maio de 2023}
+\author{
+Gustavo Valadares Castro,
+João Victor Martins Medeiros,
+Hernane Velozo Rosa,
+Pedro Igor Martins dos Reis}
+\definecolor{keywordcolor}{RGB}{0,94,255}
+\definecolor{stringcolor}{RGB}{200,50,100}
+\definecolor{commentcolor}{RGB}{50,150,50}
+\lstset{
+    language=C,
+    style=FiraCodeStyle,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{keywordcolor}\bfseries,
+    stringstyle=\color{stringcolor},
+    commentstyle=\color{commentcolor},
+    showstringspaces=false,
+    breaklines=true,
+    numbers=none,
+    frame=single,
+    rulecolor=\color{black},
+    tabsize=4,
+    captionpos=b,
+    breakatwhitespace=false,
+    extendedchars=true,
+    inputencoding=utf8,
+    morekeywords={printf, scanf, int, float, char, for, while, if, else},
+}
+\begin{document}
+\maketitle
+\section{Questão I}
+\begin{lstlisting}[language=Java,caption=Programa 'Ping Pong']
+package PingPong;
+public class PingPong extends Thread
+{
+    private String palavra;
+    public PingPong(String palavra){ this.palavra = palavra; }
+    public void run()
+    {
+        try
+        {
+            for (int i = 0; i < 1000; i++)
+            {
+                System.out.print(palavra + "");
+                if (palavra.equals("ping")) { Thread.sleep(1000); }
+                else { Thread.sleep(500); }
+            }
+        }
+        catch (InterruptedException e) { return; }
+    public static void main(String[] args)
+    {
+        PingPong t1 = new PingPong("Ping ");
+        PingPong t2 = new PingPong("Pong ");
+        t1.start();
+        t2.start();
+    }
+}
+\end{lstlisting}
+\begin{lstlisting}[language=Java,caption=Buffer.java]
+package ProdutorConsumidor;
+public class Buffer
+{
+    private int valor;
+    private boolean cheio = false;
+    public synchronized int get()
+    {
+        while (!cheio)
+        {
+            try { wait();}
+            catch (InterruptedException e) {}
+        }
+        cheio = false;
+        notifyAll();
+        System.out.println("get " + valor);
+        return valor;
+    }
+    public synchronized void put(int valor)
+    {
+        while (cheio)
+        {
+            try { wait(); }
+            catch (InterruptedException e){}
+        }
+        this.valor = valor;
+        cheio = true;
+        System.out.println("put " + valor);
+        notifyAll();
+    }
+}
+\end{lstlisting}
+\begin{lstlisting}[language=Java,caption=Consumidor.java]
+public class Consumidor extends Thread
+{
+    private Buffer buf;
+    private int numero;
+    public Consumidor(Buffer buf, int numero)
+    {
+        this.buf = buf;
+        this.numero = numero;
+    }
+    public void run()
+    {
+        int x;
+        for (int i = 0; i < 5; i++)
+        {
+            x = buf.get();
+            System.out.println("Consumidor #" + numero + "get: " + x);
+        }
+    }
+}
+\end{lstlisting}
+\begin{lstlisting}[language=Java,caption=ProdCons.java]
+public class ProdCons
+{
+    public static void main (String[] args)
+    {
+        Buffer buf = new Buffer();
+        int i;
+        for(i = 0; i < 1; i++)
+        {
+            new Consumidor(buf, i).start();
+            new Produtor(buf, i).start();
+        }
+    }
+}
+\end{lstlisting}
+\begin{lstlisting}[language=Java,caption=Produtor.java]
+public class Produtor extends Thread
+{
+        private Buffer buf;
+        private int numero;
+        public Produtor(Buffer buf, int numero)
+        {
+            this.buf = buf;
+            this.numero = numero;
+        }
+        public void run()
+        {
+            for(int i = 0; i < 5; i++)
+            {
+                buf.put(i);
+                System.out.println("Produtor #" + numero + " put: " + i);
+                try { sleep((int) (Math.random() * 100)); } catch (InterruptedException e) {}
+            }
+        }
+    }
+\end{lstlisting}
+Este algoritmo composto pelas classes \verb|Consumidor|, \verb|ProdCons| e \verb|Produtor| basicamente simula uma compra/venda onde "Consumidor" e "Produtor" dividem um buffer de tamanho fixo onde o Produtor insere informações ou enfilera jobs no buffer e o consumidor as retira do buffer ou "compra os produtos", como ambas as threads estão sendo executadas simultaneamente elas precisam saber quando houve alteração no buffer assim entra o nosso \verb|notifyAll| tendo como precedente o wait fazendo com que as threads aguardem até serem notificadas de alteração.
+\section{Questão II}
+\subsection{Problema do produtor e consumidor}
+\begin{lstlisting}[caption=Código fornecido pelo enunciado]
+#include <sys/time.h>
+#include <sys/types.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdlib.h>
+#include <stdio.h>
+#define MAX 20 // tamanho da fila circular
+#define ROUND 100 // numero de iteracoes
+#define DRES 500000
+char buffer[MAX]; // fila circular
+int inptr=0, outptr=0, inbuffer=0; // apontadores para a fila
+struct timespec delay;
+struct timeval tv;
+pthread_mutex_t mutex; // mutex
+sem_t s_produtor, s_consumidor; // semaforos para produtor e consumidor
+// Exibe o conteudo da fila e o valor dos semaforos
+void mostrabuffer(char *mens)
+{
+    int i, s_pro, s_con;
+    printf("%-10s ", mens);
+    for (i=0; i<MAX; i++)
+    {
+        printf("%c", buffer[i]);
+    }
+    sem_getvalue(&s_produtor, &s_pro);
+    sem_getvalue(&s_consumidor, &s_con);
+    printf(" p=%03d c=%03d (%03d)\n", s_pro, s_con, inbuffer);
+}
+// insere um novo caractere na fila
+void push(char c)
+{
+    if (inbuffer<MAX)
+    {
+        pthread_mutex_lock(&mutex); // inicio da sessao critica
+        buffer[inptr]=c;
+        inptr=(inptr+1)%MAX;
+        inbuffer++;
+        pthread_mutex_unlock(&mutex); // final da sessao critica
+    }
+}
+// retira um caractere da fila
+char pop(void)
+{
+    char c;
+    if (inbuffer>0) {
+        pthread_mutex_lock(&mutex); // inicio da sessao critica
+        c=buffer[outptr];
+        buffer[outptr]=' ';
+        outptr=(outptr+1)%MAX;
+        inbuffer--;
+        pthread_mutex_unlock(&mutex); // final da sessao critica
+    }
+    return(c);
+}
+// Produtor: sorteia uma letra e insere na fila
+void produtor(void *ptr)
+{
+    int n=ROUND;
+    char c;
+    while (n>0)
+    {
+        sem_wait(&s_produtor); // aguarda um espaco na fila
+        c=rand()%26+'A';
+        push(c);
+        mostrabuffer("push");
+        n--;
+        sem_post(&s_consumidor);
+        tv.tv_sec=0;
+        tv.tv_usec=((int)rand())%DRES;
+        select(0, NULL, NULL, NULL, &tv); // delay randomico
+    }
+    pthread_exit(0);
+}
+// Consumidor: retira da fila um elemento e mostra na tela
+void consumidor(void *ptr)
+{
+    int n=ROUND;
+    char c;
+    while (n>0)
+    {
+        sem_wait(&s_consumidor); // aguarda um item na fila
+        c=pop();
+        mostrabuffer("pop");
+        n--;
+        sem_post(&s_produtor);
+        tv.tv_sec=0;
+        tv.tv_usec=((int)rand())%DRES;
+        select(0, NULL, NULL, NULL, &tv); // delay randomico
+    }
+    pthread_exit(0);
+}
+/* Programa principal - cria duas threads, uma produtora e
+* outra consumidora e aguarda a finalizacao de ambas */
+int main()
+{
+    pthread_t produtor_t, consumidor_t;
+    char *message1 = "Hello";
+    char *message2 = "World";
+    int i;
+    srand(time(NULL));
+    for (i=0; i<MAX; i++)
+    buffer[i]=' '; // prepara a fila
+    sem_init(&s_produtor, 0, MAX); // produtor inicia com semaforo no
+    maximo
+    sem_init(&s_consumidor, 0, 0); // consumidor inicia com semaforo = 0
+    mostrabuffer("init");
+    // cria threads
+    pthread_create(&produtor_t, NULL, (void*)&produtor, NULL);
+    pthread_create(&consumidor_t, NULL, (void*)&consumidor, NULL);
+    // aguarda o final das threads
+    pthread_join(produtor_t, NULL);
+    pthread_join(consumidor_t, NULL);
+    mostrabuffer("end");
+    sem_destroy(&s_produtor);
+    sem_destroy(&s_consumidor);
+    return 0;
+}
+\end{lstlisting}
+A ideia do código é que existe um produtor e um consumidor que compartilham um buffer comum. O produtor produz algo e o coloca no buffer, enquanto o consumidor consome o item do buffer. Para evitar condições de corrida, é feito um mutex (exclusão mútua) e semáforos.
+Sobre o código em si:
+\begin{itemize}
+\item \textbf{Variáveis Globais e Definições:} Aqui, declara-se o buffer (um array de caracteres) que será compartilhado entre o produtor e o consumidor. Também são definidos um mutex e dois semáforos, um para o produtor \verb|(s_produtor)| e outro para o consumidor \verb|(s_consumidor)|. Inicializam-se os ponteiros para o início e o fim do buffer e a quantidade de itens no buffer (inbuffer).
+\item \textbf{Funções push e pop:} A função push insere um item no buffer e a função pop remove um item do buffer. Essas funções são protegidas por um mutex para evitar condições de corrida.
+\item \textbf{Funções produtor e consumidor:} O produtor gera um caractere aleatório e o coloca no buffer usando a função push. Antes de colocar um item no buffer, o produtor espera \verb|sem_wait| para garantir que haja espaço no buffer.
+Depois de colocar um item no buffer, ele sinaliza \verb|sem_post| para o consumidor que há um item disponível.
+O consumidor faz o oposto: espera um item estar disponível no buffer e depois o consome. Ele então sinaliza para o produtor que há espaço disponível no buffer.
+\item \textbf{Função main:} Nesta função, inicializam-se os semáforos e o buffer, e são criadas as threads para o produtor e o consumidor. A thread do produtor é inicializada para o tamanho máximo do buffer e a thread do consumidor é inicializada para 0, pois inicialmente o buffer está vazio. Em seguida, é esperado que as threads terminem com a função \verb|pthread_join| e, finalmente, os semáforos são destruídos.
+\end{itemize}
+O código também inclui a função \verb|mostrabuffer| para exibir o estado atual do buffer e dos semáforos, o que é útil para depuração e entendimento do programa. Além disso, ele introduz um atraso aleatório após cada operação de produção e consumo para tornar a interação entre o produtor e o consumidor mais realista.
+\subsection{Problema do Barbeiro Dorminhoco}
+O código abaixo cria uma thread para o barbeiro e várias threads para os clientes.
+O barbeiro e os clientes operam em loops infinitos, onde o barbeiro continua cortando o cabelo
+dos clientes e os clientes continuam chegando para ter seus cabelos cortados. O semáforo "clientes"
+é usado para representar o número de clientes esperando (inicialmente 0). O semáforo "barbeiros"
+é usado para representar o número de barbeiros disponíveis (inicialmente 0). O semáforo "mutex" é
+usado para garantir a exclusão mútua quando o número de clientes esperando ("waiting") é alterado.
+\begin{lstlisting}
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#define CHAIRS 5    // Número de cadeiras para os clientes esperarem.
+sem_t customers;    // Número de cliente esperando por serviço.
+sem_t barbers;      // Número de barbeiros esperando por clientes.
+sem_t mutex;        // Para exclusão mútua.
+int waiting = 0;    // Clientes que estão esperando (não estão sendo cortados).
+// Protótipos.
+void* barber(void *arg);
+void* customer(void *arg);
+int main()
+{
+    pthread_t b, c;
+    // Inicializa os semáforos.
+    sem_init(&customers, 0, 0);
+    sem_init(&barbers, 0, 0);
+    sem_init(&mutex, 0, 1);
+    // Cria o barbeiro.
+    pthread_create(&b, NULL, barber, NULL);
+    // Cria os clientes.
+    for(int i = 0; i < CHAIRS+1; i++)
+    {
+        pthread_create(&c, NULL, customer, NULL);
+        sleep(1);
+    }
+    // Junta as threads.
+    pthread_join(b, NULL);
+    pthread_join(c, NULL);
+    return 0;
+}
+void* barber(void *arg)
+{
+    while(1)
+    {
+        sem_wait(&customers);   // Tenta adquirir um cliente.
+        sem_wait(&mutex);       // Tenta adquirir acesso a 'waiting'.
+        waiting = waiting - 1;  // Decrementa a contagem de clientes esperando.
+        sem_post(&barbers);     // Um barbeiro agora está pronto para cortar o cabelo.
+        sem_post(&mutex);       // Libera 'waiting'.
+        printf("O barbeiro está cortando o cabelo de um cliente\n");
+        sleep(3);               // Gasta um tempo cortando o cabelo.
+    }
+}
+void* customer(void *arg)
+{
+    sem_wait(&mutex);           // Tenta adquirir acesso a 'waiting'.
+    if(waiting < CHAIRS)
+    {      // Se não houver cadeiras vazias, saia.
+        printf("Um cliente chegou e está esperando\n");
+        waiting = waiting + 1;  // Incrementa a contagem de clientes à espera.
+        sem_post(&customers);   // Acorda o barbeiro se necessário.
+        sem_post(&mutex);       // Libera o acesso a 'waiting'.
+        sem_wait(&barbers);     // Vai dormir se o número de barbeiros livres for 0.
+        printf("O cliente está tendo seu cabelo cortado\n");
+    }
+    else
+    {
+        // A barbearia está cheia; não espera.
+        sem_post(&mutex);
+        printf("A barbearia está cheia; o cliente está saindo.\n");
+    }
+}
+\end{lstlisting}
+As principais funções do programa são \verb|'barber'| e \verb|'customer'|, sendo que:
+\verb|barber(void *arg)| representa o barbeiro. O barbeiro espera por um cliente \verb|(sem_wait(&customers))|.
+Quando um cliente chega, o barbeiro começa a cortar o cabelo do cliente. O acesso à variável "waiting" é protegido
+por um mutex para evitar condições de corrida.
+Já a função \verb|customer(void *arg)| representa um cliente. O cliente primeiro adquire o mutex para verificar se há
+uma cadeira vazia. Se todas as cadeiras estiverem ocupadas (ou seja, waiting == CHAIRS), o cliente deixa a barbearia. Se
+houver uma cadeira vazia, o cliente se senta na cadeira e libera o mutex. Em seguida, o cliente acorda o barbeiro (se necessário)
+usando \verb|sem_post(&customers)|. Por fim, o cliente espera pelo barbeiro para cortar seu cabelo \verb|(sem_wait(&barbers))|.
+\subsection{Problema dos Leitores e Escritores}
+O problema descreve um sistema onde um conjunto de dados é compartilhado
+entre várias threads. Algumas dessas threads podem apenas ler os dados
+(leitores) enquanto outras threads podem tanto ler quanto alterar os dados (escritores).
+\begin{lstlisting}
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdio.h>
+
+#define TAM_ARRAY 5
+#define ITERACOES 5
+int array[TAM_ARRAY];
+
+sem_t mutex, db;
+int rc = 0;
+
+void *
+leitor (void *arg)
+{
+  int i, j;
+  for (j = 0; j < ITERACOES; j++)
+    {
+      sem_wait (&mutex);
+      rc++;
+      if (rc == 1)
+    sem_wait (&db);
+      sem_post (&mutex);
+      printf ("\t → Leitor %ld lendo: ", (long) arg);
+      for (i = 0; i < TAM_ARRAY; i++)
+    {
+      printf ("%d ", array[i]);
+    }
+      printf ("\n");
+      sem_wait (&mutex);
+      rc--;
+      if (rc == 0)
+    sem_post (&db);
+      sem_post (&mutex);
+    }
+}
+
+void *
+escritor (void *arg)
+{
+  int i, j;
+  for (j = 0; j < ITERACOES; j++)
+    {
+      sem_wait (&db);
+      printf ("\t → Escritor %ld escrevendo\n", (long) arg);
+      for (i = 0; i < TAM_ARRAY; i++)
+    {
+      array[i] = (long) arg;
+    }
+      sem_post (&db);
+    }
+}
+
+int
+main ()
+{
+  int i;
+  int n_leitores = 0;
+  int n_escritores = 0;
+  int n_interacoes = 0;
+  printf("\n\t Defina a quantidade de leitores: ");
+  scanf("%d", &n_leitores);
+  printf("\n\t Defina a quantidade de escritores: ");
+  scanf("%d", &n_escritores);
+
+  pthread_t leitores[n_leitores];
+  pthread_t escritores[n_escritores];
+
+  sem_init (&mutex, 0, 1);
+  sem_init (&db, 0, 1);
+
+  for (i = 0; i < n_leitores; i++)
+    {
+      pthread_create (&leitores[i], NULL, leitor, (void *) i);
+    }
+  for (i = 0; i < n_escritores; i++)
+    {
+      pthread_create (&escritores[i], NULL, escritor, (void *) i);
+    }
+  for (i = 0; i < n_leitores; i++)
+    {
+      pthread_join (leitores[i], NULL);
+    }
+  for (i = 0; i < n_escritores; i++)
+    {
+      pthread_join (escritores[i], NULL);
+    }
+
+  return 0;
+}
+\end{lstlisting}
+Neste código, há um semáforo mutex usado para acesso exclusivo ao contador \verb|rc| (número de leitores lendo atualmente), e um semáforo \verb|db| usado para acesso exclusivo
+ao banco de dados.
+A função \verb|leitor| adquire o semáforo mutex, incrementa o contador de leitores \verb|rc| e, se for o primeiro leitor, adquire o semáforo \verb|db|. Depois de ler, o leitor decrementa o contador \verb|rc| e, se for o último leitor, libera o semáforo \verb|db|.
+A função \verb|escritor| apenas adquire o semáforo \verb|db|, escreve e depois o libera.
+\subsection{Problema dos Fumantes}
+A situação é de três fumantes sentados em uma mesa, cada um com um dos três ingredientes: tabaco, papel e fósforos. Há também um agente que coloca dois dos três ingredientes na mesa. O fumante que tem o terceiro ingrediente faltante então faz e fuma um cigarro, sinalizando o agente ao terminar. O agente então coloca outro dois dos três ingredientes na mesa e o ciclo continua.
+\begin{lstlisting}
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+sem_t sem_agent;
+sem_t sem_smoker[3];
+void *agent(void *arg);
+void *smoker(void *arg);
+int main()
+{
+    pthread_t agent_thread, smokers[3];
+    sem_init(&sem_agent, 0, 1);
+    for(int i = 0; i < 3; i++) { sem_init(&sem_smoker[i], 0, 0); }
+    pthread_create(&agent_thread, NULL, agent, NULL);
+    for(int i = 0; i < 3; i++) { pthread_create(&smokers[i], NULL, smoker, (void *)i); }
+    pthread_join(agent_thread, NULL);
+    for(int i = 0; i < 3; i++) { pthread_join(smokers[i], NULL); }
+    return 0;
+}
+void *agent(void *arg)
+{
+    int ingredient;
+    while(1)
+    {
+        sem_wait(&sem_agent);
+        ingredient = rand() % 3;
+        printf("Agente colocou ingredientes na mesa.\n");
+        sem_post(&sem_smoker[ingredient]);
+        sleep(1);
+    }
+}
+void *smoker(void *arg)
+{
+    int smoker_id = (int)arg;
+    while(1)
+    {
+        sem_wait(&sem_smoker[smoker_id]);
+        printf("Fumante %d fez e fumou o cigarro.\n", smoker_id);
+        sem_post(&sem_agent);
+        sleep(1);
+    }
+}
+\end{lstlisting}
+Neste código, há um semáforo \verb|sem_agent| que o agente usa para sincronizar com os fumantes. Os semáforos \verb|sem_smoker[i]| são usados pelos fumantes para sincronizar com o agente.
+A função \verb|agent| aguarda o semáforo \verb|sem_agent|, coloca ingredientes na mesa e sinaliza o fumante que tem o ingrediente faltante.
+A função \verb|smoker| aguarda o semáforo \verb|sem_smoker[i]|, faz e fuma um cigarro e sinaliza o agente.
+\subsection{Problema dos Filósofos}
+Neste problema, cinco filósofos silenciosos sentam à mesa em torno de um prato de espaguete. Um garfo está colocado entre cada par de filósofos adjacentes (totalizando 5 garfos). Cada filósofo pode alternar entre duas operações: comer ou pensar. No entanto, cada filósofo precisa de ambos os garfos para pegar o espaguete e comer. Se um filósofo não puder pegar ambos os garfos (porque pelo menos um está com o vizinho), ele ficará esperando até poder pegar os dois.
+
+Em um cenário onde todos os filósofos pegarem o garfo ao mesmo tempo, pode gerar o deadlock, uma forma de contornar este problema seria adicionar uma garçom (sendo outro semáforo), através deste, serão limitados \textit{N - 1} filósofos recolherem os garços, conforme código abaixo:
+\begin{lstlisting}
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdio.h>
+#define N 5
+#define PENSANDO 0
+#define FAMINTO 1
+#define COMENDO 2
+#define ESQUERDA (numero_filosofo + 4) % N
+#define DIREITA (numero_filosofo + 1) % N
+sem_t mutex;
+sem_t S[N];
+void *filosofo(void *num);
+void pegar_garfos(int);
+void devolver_garfos(int);
+void testar(int);
+int estado[N];
+int filosofo_num[N]={0,1,2,3,4};
+int main()
+{
+    int i;
+    pthread_t thread_id[N];
+    sem_init(&mutex,0,1);
+    for(i=0; i<N; i++) { sem_init(&S[i],0,0); }
+    for(i=0; i<N; i++)
+    {
+        pthread_create(&thread_id[i], NULL, filosofo, &filosofo_num[i]);
+        printf("Filosofo %d esta pensando\n",i+1);
+    }
+    for(i=0; i<N; i++) { pthread_join(thread_id[i],NULL); }
+}
+void *filosofo(void *num)
+{
+    while(1)
+    {
+        int *i = num;
+        sleep(1);
+        pegar_garfos(*i);
+        sleep(0);
+        devolver_garfos(*i);
+    }
+}
+void pegar_garfos(int numero_filosofo)
+{
+    sem_wait(&mutex);
+    estado[numero_filosofo] = FAMINTO;
+    printf("Filosofo %d esta faminto\n", numero_filosofo + 1);
+    testar(numero_filosofo);
+    sem_post(&mutex);
+    sem_wait(&S[numero_filosofo]);
+    sleep(1);
+}
+void devolver_garfos(int numero_filosofo)
+{
+    sem_wait(&mutex);
+    estado[numero_filosofo]= PENSANDO;
+    printf("Filosofo %d devolveu os garfos %d e %d\n", numero_filosofo + 1, ESQUERDA + 1, numero_filosofo + 1);
+    printf("Filosofo %d esta pensando\n", numero_filosofo + 1);
+    testar(ESQUERDA);
+    testar(DIREITA);
+    sem_post(&mutex);
+}
+void testar(int numero_filosofo)
+{
+    if(estado[numero_filosofo] == FAMINTO && estado[ESQUERDA] != COMENDO && estado[DIREITA] != COMENDO)
+    {
+        estado[numero_filosofo] = COMENDO;
+        sleep(2);
+        printf("Filosofo %d pegou os garfos %d %d e %d\n", numero_filosofo + 1, ESQUERDA + 1, numero_filosofo + 1);
+        printf("Filosofo %d esta comendo\n", numero_filosofo + 1);
+        sem_post(&S[numero_filosofo]);
+    }
+}
+\end{lstlisting}
+No algoritmo acima, cada filósofo é representado por uma thread. Cada garfo é representado como um semáforo.
+\begin{itemize}
+\item A função \verb|filosofo| é a rotina de cada thread. Em um loop infinito, um filósofo pensa, pega os garfos, come e depois coloca os garfos de volta;
+\item A função \verb|pegar_garfos| é chamada quando um filósofo quer comer. Primeiro, ele informa que está faminto (muda seu estado para \verb|FAMINTO|), tenta pegar os garfos e, se não conseguir, espera até que possa;
+\item A função \verb|devolver_garfos| é chamada quando um filósofo termina de comer. Ele muda seu estado para \verb|PENSANDO|, coloca os garfos de volta (libera os semáforos) e, em seguida, permite que seus vizinhos (os filósofos à sua esquerda e à sua direita) tentem pegar os garfos;
+\item A função \verb|testar| é chamada para verificar se um filósofo pode começar a comer. Um filósofo pode comer se estiver faminto e se seus vizinhos não estiverem comendo.
+\end{itemize}
+\nocite{*}
+\printbibliography
+\end{document}
